@@ -2,189 +2,168 @@
 
 **English** | [Русский](README.ru.md)
 
-An account registrator for `console.groq.com` written in Rust. This is not a
-one-off script tied to the current markup, but a flow engine: registration steps
-are described in a TOML recipe, while the code handles HTTP steps, email
-waiting, captcha solving, proxy rotation and result export. When the service
-changes its routes, you edit the recipe — not the code.
+Pure JavaScript (Node.js 18+) registrator for `console.groq.com`. No Rust, no
+build step. Non-interactive by design: configuration comes from `config.json`
+plus CLI flags — no prompts, no TUI, no chat.
 
-The result of a successful run is a working **Groq API key**
-(`exposed_secret_key`, i.e. `gsk_…`), not a session token or cookie.
+A successful run creates a Groq account and writes a working **API key**
+(`gsk_…`, taken from `exposed_secret_key`) to `out/keys.txt`. Session JWTs,
+cookies and magic-link tokens are never written to the result files.
 
-## Contents
+> The previous Rust implementation is preserved in the [`rust`](../../tree/rust)
+> branch for reference.
 
-```
-src/
-  main.rs      CLI: run / check / gen / domains
-  config.rs    config.toml (run, http, captcha, email)
-  recipe.rs    TOML flow recipe + static validation of substitutions
-  flow.rs      step executor: http, email_wait, sleep; extract rules
-  runner.rs    worker pool, retries, jitter, result writer
-  http.rs      reqwest client: UA profile, cookie jar, proxy
-  captcha.rs   capsolver / 2captcha (Turnstile, reCAPTCHA v2/v3, hCaptcha)
-  email.rs     email receiving: IMAP catch-all, mail.tm, arbitrary JSON API
-  identity.rs  name / login / password generation
-  store.rs     JSONL results + separate key file
-  util.rs      {{var}} templates, JSON paths, regex extraction
-recipes/
-  groq.toml    the Groq flow itself
-tools/
-  telemetry.js  real Stytch telemetry ID
-  turnstile.js  local Turnstile solver via Chrome
-```
+## Features
 
-## Build
+- Stytch B2B Discovery magic-link flow with PKCE (10 network steps).
+- Real Stytch telemetry ID via `tools/telemetry.js` — required to avoid
+  `signup_blocked`.
+- Free local Turnstile solver via installed Chrome/Edge (`tools/turnstile.js`),
+  with internal retries.
+- Temporary mail: `tempmail_lol` (verified), `mailtm`, or a generic JSON inbox.
+- HTTP/HTTPS/SOCKS proxies with round-robin rotation (HTTP API and browsers).
+- Quiet normal output; `--verbose` enables step-by-step diagnostics.
+- No real credentials, keys or machine paths in this repository.
+
+## Requirements
+
+- Node.js 18 or newer.
+- Chrome or Edge installed (the telemetry and Turnstile helpers use
+  `playwright-core` with the installed browser; Playwright browsers are not
+  downloaded).
+- Install the helper dependency once:
 
 ```bash
-cargo build --release
-# binary: target/release/groq-regger(.exe)
+cd tools
+npm i
 ```
-
-Minimal profile: `rustup toolchain install stable`. On Windows without MSVC,
-use the GNU host (`rustup-init --default-host x86_64-pc-windows-gnu`) with
-mingw-w64 `gcc` in PATH.
 
 ## Quick start
 
 ```bash
-cp config.example.toml config.toml     # fill in email / captcha / proxies
-cp proxies.example.txt proxies.txt     # optional
+cp config.example.json config.json
+node groq-regger.js --selftest
 
-groq-regger check                      # validate recipe and environment
-groq-regger run -n 1 --dry-run         # render steps without network calls
-groq-regger run -n 10 -c 4             # 10 registrations, 4 in parallel
+node groq-regger.js --count 1
+node groq-regger.js --count 10 --proxy-file proxies.txt
 ```
 
-`run` writes:
+Keep the browser visible (the default `headless: false`). Headless telemetry
+often produces a fingerprint that Groq treats as a bot (`signup_blocked`).
 
-- `out/groq-<stamp>.jsonl` — one line per attempt: email, password, api_key,
-  proxy, duration and all flow variables;
-- `out/groq-<stamp>.keys.txt` — `key<TAB>email` for successful runs only.
+## CLI options
 
-## Recipe: the step model
+```
+Config / batch:
+  --config FILE            alternative config.json (env: GROQ_REGGER_CONFIG)
+  --count N                accounts to register (default 1)
+  --attempts N             attempts per account, fresh email each time (default 2)
+  --out FILE               JSONL results (default out/accounts.jsonl)
+  --keys-out FILE          key file (default out/keys.txt)
+  --interval SEC           pause between accounts (default 5)
 
-```toml
-[[step]]
-name   = "signup"          # label in logs
-type   = "http"            # http (default) | email_wait | sleep
-method = "POST"
-path   = "/api/auth/sign-up/email"   # relative to meta.base_url or a full URL
-headers = { referer = "https://console.groq.com/signup" }
-json   = { email = "{{email}}", password = "{{password}}" }
-expect_status   = [200, 201, 204]    # any 2xx by default
-capture_cookies = true               # split cookies into {{cookie_<name>}}
-extract = { api_key = "json:$.key" }
+Mail:
+  --provider K             tempmail_lol | mailtm | api (default tempmail_lol)
+  --email ADDR             address for provider=api
+  --email-timeout SEC      wait for the login email (default 180)
 
-[[step]]
-name             = "wait-verify-mail"
-type             = "email_wait"
-subject_contains = "verify"
-link_regex       = '''https?://[^"'\s<>]+verify[^"'\s<>]*'''
-timeout_secs     = 180
-save_as          = "verify_link"
+Network:
+  --proxy URL              http(s)://[user:pass@]host:port or
+                           socks4:// / socks4a:// / socks5:// / socks5h://
+  --proxy-type TYPE        used when --proxy is a bare host:port
+  --proxy-file FILE        one proxy per line, rotated per account
+  --proxy-bypass LIST      comma-separated bypass hosts (browser)
+  --insecure               skip TLS certificate verification
+
+Browser helpers / timing:
+  --headless               run helpers headless (not recommended)
+  --headed                 force visible browser
+  --command-timeout SEC    telemetry/captcha helper timeout (default 180)
+  --sitekey KEY            Turnstile sitekey
+  --page-url URL           /keys page URL for the solver
+
+Misc:
+  --selftest               connectivity/helper checks, no registration
+  --verbose                detailed diagnostics
+  -h, --help               this help
 ```
 
-Substitutions: `{{first_name}} {{last_name}} {{email}} {{local_part}} {{password}}
-{{uuid}} {{ts}} {{proxy}} {{captcha}}` plus everything previous steps put there
-via `extract` / `save_as` / `capture_cookies`.
+## config.json
 
-`extract` rules:
+`config.example.json` is the safe template. Important fields:
 
-| Rule | Meaning |
+```json
+{
+  "count": 1,
+  "attempts": 2,
+  "provider": "tempmail_lol",
+  "out": "out/accounts.jsonl",
+  "keysOut": "out/keys.txt",
+  "emailTimeoutSec": 180,
+  "commandTimeoutSec": 180,
+  "captchaCommand": "node tools/turnstile.js",
+  "telemetryCommand": "node tools/telemetry.js",
+  "proxyFile": null,
+  "headless": false,
+  "verbose": false
+}
+```
+
+`config.json`, `proxies.txt`, `out/` and `notes/` are gitignored.
+
+## Output
+
+- `out/accounts.jsonl` — one JSON object per successful account: `email`,
+  `password`, `api_key`, `org_id`, `project_id`, `created_at`.
+- `out/keys.txt` — `api_key<TAB>email`, one line per key.
+
+No `session_jwt`, `session_token`, cookies or magic-link tokens are stored.
+
+## Email providers
+
+- `tempmail_lol` — `api.tempmail.lol`, `/generate` + `/auth/<token>`. This is
+  the verified working option.
+- `mailtm` — public mail.tm; its domains are often blocklisted by Groq, so it
+  is mainly useful for debugging.
+- `api` — any JSON inbox. Set `apiMail.listUrl` (and optionally
+  `apiMail.detailUrl`) with `{email}` / `{id}` placeholders, and pass the target
+  address via `--email` or `GROQ_EMAIL`.
+
+## Proxies
+
+One proxy per line in `proxies.txt`; `http://`, `https://`, `socks4://`,
+`socks4a://`, `socks5://` and `socks5h://` are supported, with credentials in
+`type://user:pass@host:port`. Proxies rotate round-robin per account. The same
+proxy is passed to the browser helpers through `BROWSER_PROXY`.
+
+## Flow
+
+1. `GET /signup` — warm up the console session.
+2. `POST` Stytch `magic_links/email/discovery/send` with a PKCE challenge.
+3. Wait for the «Your login request to Groq» email and extract `?token=`.
+4. `POST` `magic_links/discovery/authenticate` → `intermediate_session_token`.
+5. Run `tools/telemetry.js` → real Stytch fingerprint ID.
+6. `POST` `profile/signupb2b` → `session_jwt` + `session_token`.
+7. `PUT` `user/profile` → `org_id`, `project_id`.
+8. Solve Turnstile and `POST` `/api/vb-token/create` → `vb_token`.
+9. `POST` `organizations/{org_id}/api_keys?project_id=…` →
+   `exposed_secret_key`.
+
+See [HANDOFF.md](HANDOFF.md) for exact endpoints, headers and failure modes.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
 |---|---|
-| `json:$.a.b[0].c` | path in the JSON response |
-| `regex:...` | first capture group (or the whole match) in the body |
-| `header:x-csrf` | response header |
-| `cookie:name` | cookie from the shared jar |
-| `status` / `url` / `raw` | status code, URL, whole body |
+| `signup_blocked` | headless telemetry or blocklisted email domain; keep the browser visible and use `tempmail_lol` |
+| `CF token is required` | Turnstile token was consumed; the helper retries automatically, an account retry also starts a fresh session |
+| `page closed while waiting for a button` | Chrome crashed; `tools/turnstile.js` retries up to 3 times |
+| `timed out waiting for the login email` | mail provider issue or wrong subject; increase `--email-timeout` |
+| `PASS/Fail` in `--selftest` | install `playwright-core` in `tools/` and check network/proxy |
 
-Captcha in an HTTP step: `captcha = "turnstile"`, `sitekey = "0x…"`, optional
-`page_url` and `captcha_var` (where to put the token; default `{{captcha}}`).
+## Tests
 
-The `meta.success_var` variable (default `api_key`) is what goes into the
-result's `api_key` and into `.keys.txt`.
-
-## Email
-
-- `imap` — catch-all domain. Messages already in the mailbox are marked as seen
-  by UID on open, then only new ones are read; MIME is decoded (QP,
-  encoded-word), links and codes are extracted with regex from the body.
-- `mailtm` — public mail.tm: the domain comes from the API, mailbox is created
-  on the fly. For Groq-like services public domains are usually blocklisted, so
-  this mode is for debugging the flow, not for volume.
-- `tempmail_lol` — `api.tempmail.lol`: the address is issued by the service on
-  `/generate`, reading via `/auth/<token>`. Domains like `*.roomsranked.com`
-  pass Groq registration (verified), but the service has no uptime guarantees.
-- `api` — any HTTP-JSON inbox (your own service, mailhook, 1secmail-compatible):
-  `list_url` with `{email}`, optional `detail_url` with `{id}`, configurable
-  fields.
-
-## Captcha
-
-Built-in solvers: `capsolver` (AntiTurnstileTaskProxyLess / ReCaptchaV2|V3 /
-HCaptcha), `twocaptcha` and `command`. The key is in `[captcha] api_key`.
-
-`provider = "none"` — a flow without a captcha: a step with `captcha = …` and no
-solver fails with a clear error, but with `captcha_optional = true` (used for the
-Turnstile on key creation) it first tries the request without a token.
-
-### Free Turnstile via your own browser
-
-`provider = "command"` runs an external program and takes the token from the
-last non-empty stdout line. The program receives env variables `CAPTCHA_KIND`,
-`CAPTCHA_SITEKEY`, `CAPTCHA_PAGE_URL`, `CAPTCHA_ACTION` and `CAPTCHA_VARS` (JSON
-with all recipe variables, including `session_jwt`).
-
-```powershell
-cd tools
-npm i                 # playwright-core, no browser download
+```bash
+node test/groq.test.js
+node groq-regger.js --selftest
 ```
-
-```toml
-[captcha]
-provider = "command"
-command  = "node tools/turnstile.js"
-```
-
-`tools/turnstile.js` opens an installed Chrome/Edge (non-headless), sets the
-`stytch_session_jwt` and `stytch_session` cookies, goes to `/keys`, clicks
-«Create API Key», waits for Turnstile to pass and prints `cfToken`. The UI
-request to `/api/vb-token/create` is intercepted and cancelled so the one-shot
-token is not burned before the recipe uses it. If the browser is not in PATH,
-set `CHROME_PATH`.
-
-### Real telemetry ID (required)
-
-An empty `POST https://gste.groq.io/submit` returns a UUID, but without a
-fingerprint — `signupb2b` then answers `400 code=signup_blocked`. The
-`get-telemetry-id` step has `type = "command"` and runs `node tools/telemetry.js`:
-the script opens `console.groq.com/signup` in Chrome and calls the real
-`window.GetTelemetryID` from Stytch telemetry.js. With such an ID registration
-passes (verified).
-
-## Behaviour and limits
-
-- `run.concurrency` workers, `run.delay_ms_min/max` jitter before each attempt.
-- `run.max_attempts` — attempts per registration, each with a fresh email and
-  (when available) the next proxy from the pool.
-- 429 and 5xx are marked retryable; recipe errors (unexpected status, empty
-  extract) are retried too, but the reason is written to the log and to the
-  record's `error` field.
-- Proxies: one proxy per line, `http://` / `socks5://`, round-robin.
-
-## Limitations
-
-The Groq flow is a **magic link** flow (Stytch B2B Discovery): email → the
-«Your login request to Groq» message → token from the link → exchange for an
-intermediate session → registration in `api.groq.com/platform/v1` → API key.
-There is no password and no captcha on the login form.
-
-All network paths and field names were checked against the console bundle, the
-Stytch bootstrap response and a live run. The `discovery/authenticate` response
-is wrapped in `data` (`$.data.intermediate_session_token`). The only captcha in
-the chain is Turnstile on key creation (`/keys`); it is solved by the free
-`command` provider.
-
-Verified end-to-end: `run -n 1` creates an account and a working key
-(`GET /openai/v1/models` → 200). A public email domain may be blocklisted by
-Groq — then you get `signup_blocked`; `tempmail.lol` currently passes.

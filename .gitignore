@@ -1,8 +1,21 @@
-/target
-/out
-/notes
+# Local state and secrets — never commit these.
+/config.json
+/config.toml
+/proxies.txt
+/out/
+/notes/
+/target/
 node_modules/
-config.toml
-proxies.txt
+tools/node_modules/
 *.log
+*.token
+*.jwt
 *.keys.txt
+accounts.jsonl
+keys.txt
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

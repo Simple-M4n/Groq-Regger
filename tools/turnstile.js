@@ -1,18 +1,18 @@
 // Free local Turnstile helper for groq-regger (provider = "command").
 //
-// Uses your installed Chrome/Edge via playwright-core, logs into console.groq.com
-// with the session JWT produced by the recipe, opens /keys, clicks
-// "Create API Key", lets Turnstile solve itself and prints the cfToken to stdout.
+// Uses installed Chrome/Edge via playwright-core. Logs in with the session JWT
+// produced by the flow, opens /keys, clicks "Create API Key", lets Turnstile
+// solve itself and prints the single-use cfToken on stdout.
 //
 // The UI's own /api/vb-token/create request is intercepted and aborted right
-// after the token is captured, so the single-use Turnstile token stays fresh
-// for the recipe's API call.
+// after the token is captured, so the token stays fresh for the API call.
 //
 // Input (environment, set by groq-regger):
-//   CAPTCHA_VARS       JSON with recipe variables (needs session_jwt)
-//   CAPTCHA_SITEKEY    sitekey from the recipe
-//   CAPTCHA_PAGE_URL   page to open (https://console.groq.com/keys)
-//   CAPTCHA_ACTION     optional action (unused for Turnstile)
+//   CAPTCHA_VARS        JSON with recipe variables (needs session_jwt)
+//   CAPTCHA_SITEKEY     sitekey from the recipe
+//   CAPTCHA_PAGE_URL    page to open (https://console.groq.com/keys)
+//   CAPTCHA_ACTION      optional action (unused for Turnstile)
+//   TURNSTILE_RETRIES   how many full browser attempts (default 3)
 //
 // Output: exactly one line on stdout — the token. Logs go to stderr.
 
@@ -20,8 +20,25 @@ const { chromium } = require('playwright-core');
 
 const CREATE_SEL = '[data-testid="keys-page-create-button"]';
 const SUBMIT_SEL = '[data-testid="key-form-submit-button"]';
+const RETRIES = Math.max(1, Number.parseInt(process.env.TURNSTILE_RETRIES || '3', 10) || 3);
 
 function log(...a) { console.error('[turnstile]', ...a); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function browserProxy() {
+  const raw = process.env.BROWSER_PROXY || '';
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    const result = { server: `${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}` };
+    if (u.username) result.username = decodeURIComponent(u.username);
+    if (u.password) result.password = decodeURIComponent(u.password);
+    return result;
+  } catch (e) {
+    log('invalid BROWSER_PROXY:', e.message);
+    return undefined;
+  }
+}
 
 function readVars() {
   try { return JSON.parse(process.env.CAPTCHA_VARS || '{}'); } catch { return {}; }
@@ -35,7 +52,11 @@ async function launch() {
     try {
       const browser = await chromium.launch({
         headless: false,
-        args: ['--disable-blink-features=AutomationControlled'],
+        proxy: browserProxy(),
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          ...(process.env.BROWSER_PROXY ? [] : ['--no-proxy-server']),
+        ],
         ...opts,
       });
       log('launched', JSON.stringify(opts));
@@ -47,80 +68,97 @@ async function launch() {
   throw lastErr || new Error('no Chrome/Edge found; set CHROME_PATH');
 }
 
-// Wait until a button is present, visible and not disabled.
 async function waitButtonEnabled(page, selector, nameRe, timeout) {
-  await page.waitForFunction(
-    ({ selector, nameRe }) => {
-      const re = new RegExp(nameRe, 'i');
-      const buttons = Array.from(document.querySelectorAll('button'));
-      const b = buttons.find((x) => x.matches?.(selector)) ||
-        buttons.find((x) => re.test((x.textContent || '').trim()));
-      if (!b) return false;
-      const style = window.getComputedStyle(b);
-      return !b.disabled && style.visibility !== 'hidden' && style.display !== 'none';
-    },
-    { selector, nameRe },
-    { timeout, polling: 500 },
-  );
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (page.isClosed()) throw new Error('page closed while waiting for a button');
+    try {
+      const ok = await page.evaluate(
+        ({ selector, nameRe }) => {
+          const re = new RegExp(nameRe, 'i');
+          const buttons = Array.from(document.querySelectorAll('button'));
+          const b = buttons.find((x) => x.matches?.(selector))
+            || buttons.find((x) => re.test((x.textContent || '').trim()));
+          if (!b) return false;
+          const style = window.getComputedStyle(b);
+          return !b.disabled && style.visibility !== 'hidden' && style.display !== 'none';
+        },
+        { selector, nameRe },
+      );
+      if (ok) return;
+    } catch (e) {
+      if (page.isClosed()) throw new Error('page closed while waiting for a button');
+      // Execution context was replaced by a navigation — just poll again.
+    }
+    await sleep(500);
+  }
+  throw new Error('button stayed disabled (Turnstile did not solve)');
 }
 
 async function dumpTurnstileState(page) {
-  const info = await page.evaluate(() => ({
-    frames: Array.from(document.querySelectorAll('iframe')).map((f) => f.src).filter(Boolean),
-    inputs: Array.from(document.querySelectorAll('input')).map((i) => i.name || i.type).slice(0, 20),
-    body: (document.body.innerText || '').slice(0, 300),
-  }));
-  log('page state:', JSON.stringify(info));
+  try {
+    const info = await page.evaluate(() => ({
+      frames: Array.from(document.querySelectorAll('iframe')).map((f) => f.src).filter(Boolean),
+      inputs: Array.from(document.querySelectorAll('input')).map((i) => i.name || i.type).slice(0, 20),
+      body: (document.body.innerText || '').slice(0, 300),
+    }));
+    log('page state:', JSON.stringify(info));
+  } catch { /* page is gone */ }
 }
 
-(async () => {
-  const vars = readVars();
-  const jwt = vars.session_jwt || vars.cookie_stytch_session_jwt;
-  if (!jwt) throw new Error('session_jwt missing in CAPTCHA_VARS');
-
-  const pageUrl = process.env.CAPTCHA_PAGE_URL || 'https://console.groq.com/keys';
+async function oneAttempt(vars, pageUrl) {
   const browser = await launch();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-
-  const opaque = vars.session_token || vars.cookie_stytch_session;
-  const cookies = [{
-    name: 'stytch_session_jwt',
-    value: jwt,
-    domain: '.groq.com',
-    path: '/',
-    httpOnly: false,
-    secure: true,
-    sameSite: 'Lax',
-  }];
-  if (opaque) {
-    cookies.push({
-      name: 'stytch_session',
-      value: opaque,
+  let context = null;
+  try {
+    const opaque = vars.session_token || vars.cookie_stytch_session;
+    const cookies = [{
+      name: 'stytch_session_jwt',
+      value: vars.session_jwt || vars.cookie_stytch_session_jwt,
       domain: '.groq.com',
       path: '/',
       httpOnly: false,
       secure: true,
       sameSite: 'Lax',
+    }];
+    if (opaque) {
+      cookies.push({
+        name: 'stytch_session',
+        value: opaque,
+        domain: '.groq.com',
+        path: '/',
+        httpOnly: false,
+        secure: true,
+        sameSite: 'Lax',
+      });
+    }
+
+    context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await context.addCookies(cookies);
+    const page = await context.newPage();
+
+    let resolveToken;
+    let rejectToken;
+    const tokenPromise = new Promise((resolve, reject) => {
+      resolveToken = resolve;
+      rejectToken = reject;
     });
-  }
-  await context.addCookies(cookies);
+    let captured = false;
 
-  const page = await context.newPage();
-  let resolveToken;
-  const done = new Promise((resolve) => { resolveToken = resolve; });
+    await page.route('**/api/vb-token/create', async (route) => {
+      try {
+        const body = JSON.parse(route.request().postData() || '{}');
+        if (body.cfToken && !captured) {
+          captured = true;
+          log('captured cfToken from vb-token request (aborting it)');
+          resolveToken(body.cfToken);
+        }
+      } catch { /* ignore */ }
+      await route.abort('aborted').catch(() => {});
+    });
+    page.once('close', () => {
+      if (!captured) rejectToken(new Error('page closed before the token was captured'));
+    });
 
-  await page.route('**/api/vb-token/create', async (route) => {
-    try {
-      const body = JSON.parse(route.request().postData() || '{}');
-      if (body.cfToken) {
-        log('captured cfToken from vb-token request (aborting it)');
-        resolveToken(body.cfToken);
-      }
-    } catch { /* ignore */ }
-    await route.abort('aborted').catch(() => {});
-  });
-
-  try {
     log('opening', pageUrl);
     await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
@@ -131,9 +169,9 @@ async function dumpTurnstileState(page) {
     log('waiting for the create button to unlock (page Turnstile)...');
     try {
       await waitButtonEnabled(page, CREATE_SEL, 'create api key', 90000);
-    } catch {
+    } catch (e) {
       await dumpTurnstileState(page);
-      throw new Error('Create API Key button stayed disabled (Turnstile did not solve)');
+      throw e;
     }
 
     const create = page.locator(CREATE_SEL)
@@ -149,9 +187,9 @@ async function dumpTurnstileState(page) {
     log('waiting for the submit button to unlock (dialog Turnstile)...');
     try {
       await waitButtonEnabled(page, SUBMIT_SEL, '^submit$', 90000);
-    } catch {
+    } catch (e) {
       await dumpTurnstileState(page);
-      throw new Error('Submit button stayed disabled (Turnstile did not solve)');
+      throw e;
     }
 
     const submit = page.locator(SUBMIT_SEL)
@@ -159,19 +197,41 @@ async function dumpTurnstileState(page) {
     await submit.click();
     log('submitted, waiting for /api/vb-token/create');
 
-    const token = await Promise.race([
-      done,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timed out waiting for token')), 90000)),
+    return await Promise.race([
+      tokenPromise,
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('timed out waiting for token')),
+        90000,
+      )),
     ]);
-    process.stdout.write(token + '\n');
-    process.exitCode = 0;
-  } catch (e) {
-    log('error:', e.message);
-    process.exitCode = 1;
   } finally {
-    await context.close().catch(() => {});
+    await context?.close().catch(() => {});
     await browser.close().catch(() => {});
   }
+}
+
+(async () => {
+  const vars = readVars();
+  if (!vars.session_jwt && !vars.cookie_stytch_session_jwt) {
+    log('session_jwt missing in CAPTCHA_VARS');
+    process.exit(1);
+  }
+  const pageUrl = process.env.CAPTCHA_PAGE_URL || 'https://console.groq.com/keys';
+
+  let lastErr;
+  for (let i = 1; i <= RETRIES; i += 1) {
+    try {
+      const token = await oneAttempt(vars, pageUrl);
+      process.stdout.write(token + '\n');
+      process.exit(0);
+    } catch (e) {
+      lastErr = e;
+      log(`attempt ${i}/${RETRIES} failed: ${e.message}`);
+      if (i < RETRIES) await sleep(1500);
+    }
+  }
+  log('fatal:', lastErr?.message || 'unknown error');
+  process.exit(1);
 })().catch((e) => {
   log('fatal:', e.message);
   process.exit(1);

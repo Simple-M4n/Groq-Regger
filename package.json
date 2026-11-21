@@ -1,0 +1,19 @@
+{
+  "name": "groq-regger",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Non-interactive Groq registrator in pure JavaScript (API key output)",
+  "main": "groq-regger.js",
+  "bin": {
+    "groq-regger": "groq-regger.js"
+  },
+  "scripts": {
+    "start": "node groq-regger.js",
+    "selftest": "node groq-regger.js --selftest",
+    "test": "node test/groq.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

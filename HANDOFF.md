@@ -1,185 +1,122 @@
-# HANDOFF — groq-regger (Rust)
+# HANDOFF — groq-regger (JavaScript)
 
 **English** | [Русский](HANDOFF.ru.md)
 
-Project: `groq-regger` (this repository).
-Goal: a registrator for `console.groq.com` accounts that issues a working Groq
-API key (not a token or cookie).
+Project: `groq-regger`, `main` branch (pure JavaScript).
+The previous Rust implementation is kept in the `rust` branch.
 
-Status: **done and verified end-to-end**. `run -n 1` creates an account and a
-key; the key was verified with `GET https://api.groq.com/openai/v1/models`
-(`Authorization: Bearer <key>` → 200, 11 models).
+Goal: a non-interactive registrator for `console.groq.com` that outputs a
+working Groq **API key** (`gsk_…`), not a token or cookie.
 
 ---
 
 ## 1. Environment
 
-- Rust 1.100.0, host `x86_64-pc-windows-gnu`.
-- `cargo` is NOT in PATH by default. Before building:
-  `$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"`
-- Build: `cargo build --release` (from the repository root).
-- Binary: `target\release\groq-regger.exe`.
-- Checks: `groq-regger check` · `gen -n 3` · `run -n 1 --dry-run`.
-- Node.js 18+ and an installed Chrome/Edge. Tools dependency — `playwright-core`
-  (`cd tools; npm i`); no need to download Playwright browsers.
+- Node.js 18+ (tested on Node 26). No Rust, no build step.
+- Helper dependency: `playwright-core` in `tools/` (`cd tools; npm i`).
+  Playwright browsers are not downloaded; installed Chrome/Edge is used.
+- Keep the browser visible: `headless: false`. Headless telemetry frequently
+  causes `signup_blocked`.
+- If `npm.ps1` is blocked by PowerShell policy, run npm via its CLI script, e.g.
+  `node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" i`.
 
-## 2. Real Groq flow (verified in a live run)
+## 2. Verified Groq flow
 
-1. `GET console.groq.com/signup` — no captcha.
-2. `POST api.stytchb2b.groq.com/sdk/v1/b2b/magic_links/email/discovery/send`
-   (`email_address`, `discovery_redirect_url`, `pkce_code_challenge`).
+1. `GET https://console.groq.com/signup` — no captcha.
+2. `POST https://api.stytchb2b.groq.com/sdk/v1/b2b/magic_links/email/discovery/send`
+   — `email_address`, `discovery_redirect_url`, `pkce_code_challenge`.
+   Basic auth uses the public Stytch token twice (`token:token`); headers include
+   `x-sdk-parent-host` and a generated `x-sdk-client` blob.
 3. Email from `noreply@groq.com` «Your login request to Groq», token in `?token=`.
-4. `POST .../b2b/magic_links/discovery/authenticate`
-   (`discovery_magic_links_token`, `pkce_code_verifier`).
-   **The response is wrapped:** `$.data.intermediate_session_token`.
-5. `POST gste.groq.io/submit` — a **real fingerprint ID** from Stytch
-   telemetry.js is required. An empty POST gives a UUID without a fingerprint →
-   `signup_blocked`.
-6. `POST api.groq.com/platform/v1/user/profile/signupb2b`
-   (`x-stytch-telemetry-id`) → `session_jwt` + `session_token`.
-7. `PUT api.groq.com/platform/v1/user/profile` (Bearer) → `org_id`, `project_id`.
-8. `POST console.groq.com/api/vb-token/create` (`cfToken`) → `vb_token`.
-   This is the only captcha in the chain — Cloudflare Turnstile, sitekey
-   `0x4AAAAAAA04hiaY8r8_QF1r`, page `/keys`.
-9. `POST api.groq.com/platform/v1/organizations/{org_id}/api_keys?project_id=…`
-   (`name`, `cf_token`, `vb_token`) → `exposed_secret_key` (the API key).
+4. `POST .../b2b/magic_links/discovery/authenticate` with
+   `discovery_magic_links_token` + `pkce_code_verifier`
+   → `$.data.intermediate_session_token`.
+5. `tools/telemetry.js` runs the real `window.GetTelemetryID` from Stytch
+   telemetry.js in Chrome/Edge and prints a 36-char ID. An empty POST to
+   `gste.groq.io/submit` gives a UUID without a fingerprint → `signup_blocked`.
+6. `POST https://api.groq.com/platform/v1/user/profile/signupb2b`
+   with `x-stytch-telemetry-id` → `session_jwt` + `session_token`.
+7. `PUT https://api.groq.com/platform/v1/user/profile` (Bearer)
+   → `$.user.orgs.data[0].id` and `.projects.data[0].id`.
+8. Turnstile (sitekey `0x4AAAAAAA04hiaY8r8_QF1r`, page `/keys`) is solved by
+   `tools/turnstile.js`; `POST https://console.groq.com/api/vb-token/create`
+   with `{cfToken}` → `vb_token`. The UI's own request is intercepted and
+   aborted so the one-shot token is not consumed.
+9. `POST https://api.groq.com/platform/v1/organizations/{org_id}/api_keys?project_id=…`
+   with `{name, cf_token, vb_token}` → `exposed_secret_key`.
 
 ## 3. Architecture
 
 ```
-src/main.rs      CLI: run / check / gen / domains
-src/config.rs    config.toml → Settings
-src/recipe.rs    TOML recipe (Step/Meta) + static validation of substitutions
-src/flow.rs      steps: http | email_wait | sleep | command; extract rules
-src/runner.rs    workers, retries, jitter, Record (vars written even on error)
-src/http.rs      reqwest: Chrome UA/headers, cookie jar, proxy
-src/captcha.rs   capsolver / 2captcha / command / none
-src/email.rs     imap | mailtm | tempmail_lol | api
-src/identity.rs  name / login / password
-src/store.rs     out/<name>-<stamp>.jsonl + .keys.txt
-src/util.rs      {{var}}, JSON paths, regex, PKCE, Stytch header
-tools/turnstile.js  free Turnstile via Chrome (provider = command)
-tools/telemetry.js  real Stytch fingerprint ID (step type = command)
+groq-regger.js      CLI: config + flags, account loop, result writing
+lib/http.js         node:http/https transport with HTTP(S)/SOCKS proxy support
+lib/proxy.js        proxy normalization, list parsing, rotation
+lib/mail.js         tempmail_lol | mailtm | api providers, magic-token extraction
+lib/identity.js     names / login / password / UUID generation
+lib/commands.js     external command runner, telemetry + Turnstile wrappers
+lib/groq.js         10-step flow, produces only the API key in the record
+lib/store.js        append-only JSONL + key file
+tools/*.js          browser helpers (CommonJS, use tools/node_modules)
+test/groq.test.js   unit checks (run: node test/groq.test.js)
 ```
 
-### Recipe
+Records intentionally omit `session_jwt`, `session_token`, cookies and
+magic-link tokens. Only `api_key`, email/password and org ids are stored locally.
 
-```toml
-[[step]]
-type = "http"            # default
-method = "POST"
-path = "/api/..."
-headers = { ... }
-json = { email = "{{email}}" }
-expect_status = [200]
-capture_cookies = true
-extract = { api_key = "json:$.key" }
-captcha = "turnstile"
-sitekey = "0x..."
-captcha_var = "cf_token"
-captcha_optional = true
+## 4. Config
 
-[[step]]
-type = "email_wait"
-subject_contains = "login request"
-link_regex = '''[?&]token=([^"'\s&<>]+)'''
-timeout_secs = 180
-save_as = "login_token"
+Copy `config.example.json` to `config.json`. Key fields:
 
-[[step]]
-type = "sleep"
-ms = 1500
-
-[[step]]
-type = "command"         # last non-empty stdout line → save_as
-command = "node tools/telemetry.js"
-save_as = "telemetry_id"
-timeout_secs = 120
+```json
+{
+  "provider": "tempmail_lol",
+  "attempts": 2,
+  "emailTimeoutSec": 180,
+  "commandTimeoutSec": 180,
+  "captchaCommand": "node tools/turnstile.js",
+  "telemetryCommand": "node tools/telemetry.js",
+  "proxyFile": null,
+  "headless": false,
+  "verbose": false
+}
 ```
 
-`extract`: `json:$.a.b[0]`, `regex:...`, `header:x`, `cookie:name`,
-`status`, `url`, `raw`.
+CLI flags override config values. Proxies are rotated per account and passed to
+browser helpers via `BROWSER_PROXY`.
 
-Variables: `{{email}} {{password}} {{first_name}} {{last_name}} {{local_part}}
-{{uuid}} {{ts}} {{proxy}} {{captcha}} {{pkce_verifier}} {{pkce_challenge}}
-{{stytch_client_header}}` plus all `extract` / `save_as` / `cookie_*` values.
-A command receives env `STEP_NAME` and `STEP_VARS` (JSON with all variables).
+## 5. Turnstile reliability
 
-## 4. Current recipe (10 steps)
+`tools/turnstile.js` retries the **entire browser session** up to
+`TURNSTILE_RETRIES` times (default 3). Button waiting is a manual polling loop
+that survives execution-context replacements and detects a closed page early.
+The token is captured from the intercepted `/api/vb-token/create` request; the
+request is then aborted so the token stays single-use and fresh for step 9.
 
-```
- 1 login-page          GET  /signup
- 2 request-magic-link  POST Stytch discovery/send
- 3 settle              sleep 1500
- 4 wait-login-mail     email_wait → login_token
- 5 authenticate-token  POST discovery/authenticate → $.data.intermediate_session_token
- 6 get-telemetry-id    command: node tools/telemetry.js → telemetry_id
- 7 signup-b2b          POST signupb2b → session_jwt, session_token
- 8 get-org             PUT user/profile → org_id, project_id
- 9 create-vb-token     POST /api/vb-token/create {cfToken} → vb_token
-10 create-key          POST organizations/{org_id}/api_keys?... → exposed_secret_key
-```
+Account-level `--attempts` (default 2) creates a fresh email and session on
+each retry.
 
-## 5. Why it works (don't break this)
+## 6. Acceptance
 
-- **Telemetry.** `gste.groq.io/submit` with an empty body → `signup_blocked`.
-  The ID must come from a real `window.GetTelemetryID` call in
-  `api.stytchb2b.groq.com/telemetry.js` inside a real browser. That is what
-  `tools/telemetry.js` does.
-- **Turnstile helper.** Sets both cookies: `stytch_session_jwt` and
-  `stytch_session` (value = `session_token`), **not httpOnly** (the Stytch SDK
-  reads them via `document.cookie`). Opens `/keys`, waits for the button to be
-  enabled, enters the name, clicks Submit. The UI request to
-  `/api/vb-token/create` is intercepted via `page.route` and **cancelled** after
-  reading `cfToken`, otherwise the one-shot token is burned and the recipe gets
-  «CF token is required» / duplicate errors.
-- **Email.** `tempmail_lol` (`api.tempmail.lol`) issues an address on `/generate`,
-  reads via `/auth/<token>`. Domains `*.roomsranked.com`, `*.marchslurp.com`
-  pass Groq. `mail.tm` (`fldubai.com`) → `signup_blocked`.
-  For volume, a catch-all IMAP of your own is better.
-
-## 6. Config (working)
-
-```toml
-[email]
-provider = "tempmail_lol"   # imap | mailtm | tempmail_lol | api
-
-[captcha]
-provider = "command"
-command  = "node tools/turnstile.js"
+```bash
+node groq-regger.js --selftest
+node groq-regger.js --count 1 --attempts 1 --verbose
+node groq-regger.js --count 10 --proxy-file proxies.txt
 ```
 
-`mailtm` and `tempmail_lol` assign the address themselves; the runner overrides
-`{{email}}` and `{{local_part}}` after opening the mailbox. For `imap`/`api`,
-`email.domains` is used.
+Success: `summary: 1/1 API keys written to .../out/keys.txt`, one line
+`gsk_…<TAB>email` in `out/keys.txt`, and a matching record in
+`out/accounts.jsonl`. A key can be checked with:
 
-## 7. Run and acceptance
-
-```powershell
-cd groq-regger
-.\target\release\groq-regger.exe check
-$env:RUST_LOG="info,groq_regger=debug"
-.\target\release\groq-regger.exe run -n 1 -c 1
+```
+GET https://api.groq.com/openai/v1/models
+Authorization: Bearer <key>
 ```
 
-Success: an `"status":"ok"` record with `api_key` in
-`out/groq-<stamp>.jsonl`, a `key<TAB>email` line in `.keys.txt`, and the key
-returning 200 from `https://api.groq.com/openai/v1/models`.
+## 7. Don't break
 
-## 8. Typical errors
-
-| Symptom | Cause / fix |
-|---|---|
-| `signup_blocked` | empty telemetry ID or a blocklisted email domain |
-| `CF token is required` | Turnstile not solved / token already used |
-| login page in Chrome | `stytch_session` not set or cookie is httpOnly |
-| `extract intermediate_session_token ... nothing` | missing `$.data.` prefix |
-| `mail.tm 429/401` | IP limit; wait or use `tempmail_lol` |
-
-## 9. Don't break
-
-- `Step`/`Meta` fields and step names in the recipe;
-- `check` → `validation: ok`;
-- `--dry-run` makes no network calls (command/captcha use stubs);
-- IMAP UIDs as strings;
-- never commit secrets: `.keys.txt` and `out/*.jsonl` contain keys.
+- Keep `exposed_secret_key` as the success value; never emit a session token.
+- Keep the browser visible by default; headless telemetry breaks signup.
+- Keep secrets and machine paths out of tracked files (`out/`, `config.json`,
+  `proxies.txt` are ignored).
+- Keep the stdout contract of the tools: token/ID on the last stdout line,
+  diagnostics on stderr.

@@ -1,0 +1,31 @@
+{
+  "count": 1,
+  "attempts": 2,
+  "provider": "tempmail_lol",
+  "email": "",
+  "out": "out/accounts.jsonl",
+  "keysOut": "out/keys.txt",
+  "intervalSec": 5,
+  "timeoutSec": 45,
+  "emailTimeoutSec": 180,
+  "commandTimeoutSec": 180,
+  "telemetryCommand": "node tools/telemetry.js",
+  "captchaCommand": "node tools/turnstile.js",
+  "sitekey": "0x4AAAAAAA04hiaY8r8_QF1r",
+  "pageUrl": "https://console.groq.com/keys",
+  "stytchPublicToken": "public-token-live-58df57a9-a1f5-4066-bc0c-2ff942db684f",
+  "telemetrySubmitUrl": "https://gste.groq.io/submit",
+  "tempmailBase": "https://api.tempmail.lol",
+  "mailtmBase": "https://api.mail.tm",
+  "apiMail": {
+    "listUrl": "",
+    "detailUrl": ""
+  },
+  "proxy": null,
+  "proxyType": null,
+  "proxyFile": null,
+  "proxyBypass": null,
+  "insecure": false,
+  "headless": false,
+  "verbose": false
+}
