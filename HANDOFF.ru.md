@@ -15,8 +15,10 @@
 - Node.js 18+ (проверено на Node 26). Rust и сборка не нужны.
 - Зависимость хелперов: `playwright-core` в `tools/` (`cd tools; npm i`).
   Браузеры Playwright не скачиваются — используется установленный Chrome/Edge.
-- Держите браузер видимым: `headless: false`. Headless-telemetry часто даёт
-  `signup_blocked`.
+- Скрытый браузер включён по умолчанию: `headless: true`. Это **обычный** Chrome
+  с `--window-position=-2400,-2400`: окно не видно, но все сигналы fingerprint
+  совпадают с видимым браузером (проверено посегментно). Настоящий headless
+  Chromium (`TRUE_HEADLESS=1`) даёт другой fingerprint и `signup_blocked`.
 - Если PowerShell блокирует `npm.ps1`, запускайте npm через CLI-скрипт, например
   `node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" i`.
 
@@ -76,7 +78,7 @@ test/groq.test.js   юнит-проверки (node test/groq.test.js)
   "captchaCommand": "node tools/turnstile.js",
   "telemetryCommand": "node tools/telemetry.js",
   "proxyFile": null,
-  "headless": false,
+  "headless": true,
   "verbose": false
 }
 ```
@@ -116,7 +118,11 @@ Authorization: Bearer <key>
 
 - `exposed_secret_key` должен оставаться успешным результатом; никогда не
   выдавать сессионный токен.
-- Браузер по умолчанию видимый; headless-telemetry ломает регистрацию.
+- `headless: true` = обычный Chrome с окном вне экрана; настоящий headless
+  ломает регистрацию.
+- Если `signup_blocked` появляется даже в `--headed`, IP/устройство временно
+  ограничено Groq после нескольких регистраций — подождите или используйте
+  прокси.
 - Не коммитить секреты и машинные пути (`out/`, `config.json`, `proxies.txt`
   в `.gitignore`).
 - Хелперы должны печатать токен/ID последней строкой stdout, диагностику —

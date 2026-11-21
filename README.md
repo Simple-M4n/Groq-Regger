@@ -22,6 +22,8 @@ cookies and magic-link tokens are never written to the result files.
   with internal retries.
 - Temporary mail: `tempmail_lol` (verified), `mailtm`, or a generic JSON inbox.
 - HTTP/HTTPS/SOCKS proxies with round-robin rotation (HTTP API and browsers).
+- Hidden browser by default: real Chrome window placed off-screen (no visible
+  window, but a genuine browser fingerprint).
 - Quiet normal output; `--verbose` enables step-by-step diagnostics.
 - No real credentials, keys or machine paths in this repository.
 
@@ -48,8 +50,11 @@ node groq-regger.js --count 1
 node groq-regger.js --count 10 --proxy-file proxies.txt
 ```
 
-Keep the browser visible (the default `headless: false`). Headless telemetry
-often produces a fingerprint that Groq treats as a bot (`signup_blocked`).
+The browser is hidden by default (`headless: true`): a real headed Chrome is
+launched with its window moved far off-screen, so nothing pops up on the
+desktop but the fingerprint is identical to a normal browser. Use `--headed` if
+you want to see it. `TRUE_HEADLESS=1` forces Chromium's real headless mode, but
+Groq currently rejects its fingerprint with `signup_blocked`.
 
 ## CLI options
 
@@ -76,8 +81,8 @@ Network:
   --insecure               skip TLS certificate verification
 
 Browser helpers / timing:
-  --headless               run helpers headless (not recommended)
-  --headed                 force visible browser
+  --headless               hide browser window (default; real Chrome off-screen)
+  --headed                 show browser window
   --command-timeout SEC    telemetry/captcha helper timeout (default 180)
   --sitekey KEY            Turnstile sitekey
   --page-url URL           /keys page URL for the solver
@@ -104,7 +109,7 @@ Misc:
   "captchaCommand": "node tools/turnstile.js",
   "telemetryCommand": "node tools/telemetry.js",
   "proxyFile": null,
-  "headless": false,
+  "headless": true,
   "verbose": false
 }
 ```
@@ -155,7 +160,7 @@ See [HANDOFF.md](HANDOFF.md) for exact endpoints, headers and failure modes.
 
 | Symptom | Cause / fix |
 |---|---|
-| `signup_blocked` | headless telemetry or blocklisted email domain; keep the browser visible and use `tempmail_lol` |
+| `signup_blocked` | Groq risk engine; hidden mode has the same fingerprint as visible, but repeated signups from one IP get rate-limited — use `--proxy-file proxies.txt` and `tempmail_lol` |
 | `CF token is required` | Turnstile token was consumed; the helper retries automatically, an account retry also starts a fresh session |
 | `page closed while waiting for a button` | Chrome crashed; `tools/turnstile.js` retries up to 3 times |
 | `timed out waiting for the login email` | mail provider issue or wrong subject; increase `--email-timeout` |

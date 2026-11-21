@@ -16,56 +16,18 @@
 //
 // Output: exactly one line on stdout — the token. Logs go to stderr.
 
-const { chromium } = require('playwright-core');
+const { launchBrowser, createStealthContext } = require('./browser.js');
 
 const CREATE_SEL = '[data-testid="keys-page-create-button"]';
 const SUBMIT_SEL = '[data-testid="key-form-submit-button"]';
 const RETRIES = Math.max(1, Number.parseInt(process.env.TURNSTILE_RETRIES || '3', 10) || 3);
+const HEADLESS = process.env.HEADLESS === '1';
 
 function log(...a) { console.error('[turnstile]', ...a); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function browserProxy() {
-  const raw = process.env.BROWSER_PROXY || '';
-  if (!raw) return undefined;
-  try {
-    const u = new URL(raw);
-    const result = { server: `${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}` };
-    if (u.username) result.username = decodeURIComponent(u.username);
-    if (u.password) result.password = decodeURIComponent(u.password);
-    return result;
-  } catch (e) {
-    log('invalid BROWSER_PROXY:', e.message);
-    return undefined;
-  }
-}
-
 function readVars() {
   try { return JSON.parse(process.env.CAPTCHA_VARS || '{}'); } catch { return {}; }
-}
-
-async function launch() {
-  const attempts = [{ channel: 'chrome' }, { channel: 'msedge' }];
-  if (process.env.CHROME_PATH) attempts.unshift({ executablePath: process.env.CHROME_PATH });
-  let lastErr;
-  for (const opts of attempts) {
-    try {
-      const browser = await chromium.launch({
-        headless: false,
-        proxy: browserProxy(),
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          ...(process.env.BROWSER_PROXY ? [] : ['--no-proxy-server']),
-        ],
-        ...opts,
-      });
-      log('launched', JSON.stringify(opts));
-      return browser;
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error('no Chrome/Edge found; set CHROME_PATH');
 }
 
 async function waitButtonEnabled(page, selector, nameRe, timeout) {
@@ -107,7 +69,7 @@ async function dumpTurnstileState(page) {
 }
 
 async function oneAttempt(vars, pageUrl) {
-  const browser = await launch();
+  const browser = await launchBrowser({ headless: HEADLESS, log });
   let context = null;
   try {
     const opaque = vars.session_token || vars.cookie_stytch_session;
@@ -132,7 +94,7 @@ async function oneAttempt(vars, pageUrl) {
       });
     }
 
-    context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    context = await createStealthContext(browser);
     await context.addCookies(cookies);
     const page = await context.newPage();
 

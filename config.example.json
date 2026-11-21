@@ -26,6 +26,6 @@
   "proxyFile": null,
   "proxyBypass": null,
   "insecure": false,
-  "headless": false,
+  "headless": true,
   "verbose": false
 }

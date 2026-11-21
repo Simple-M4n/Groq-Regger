@@ -15,7 +15,7 @@
 //   TELEMETRY_SUBMIT_URL    override submit endpoint
 //   TELEMETRY_RETRIES       browser attempts (default 3)
 
-const { chromium } = require('playwright-core');
+const { launchBrowser, createStealthContext } = require('./browser.js');
 
 const PUBLIC_TOKEN = process.env.STYTCH_PUBLIC_TOKEN
   || 'public-token-live-58df57a9-a1f5-4066-bc0c-2ff942db684f';
@@ -26,50 +26,11 @@ const HEADLESS = process.env.HEADLESS === '1';
 function log(...a) { console.error('[telemetry]', ...a); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function browserProxy() {
-  const raw = process.env.BROWSER_PROXY || '';
-  if (!raw) return undefined;
-  try {
-    const u = new URL(raw);
-    const result = { server: `${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}` };
-    if (u.username) result.username = decodeURIComponent(u.username);
-    if (u.password) result.password = decodeURIComponent(u.password);
-    return result;
-  } catch (e) {
-    log('invalid BROWSER_PROXY:', e.message);
-    return undefined;
-  }
-}
-
-async function launch() {
-  const attempts = [{ channel: 'chrome' }, { channel: 'msedge' }];
-  if (process.env.CHROME_PATH) attempts.unshift({ executablePath: process.env.CHROME_PATH });
-  let lastErr;
-  for (const opts of attempts) {
-    try {
-      const browser = await chromium.launch({
-        headless: HEADLESS,
-        proxy: browserProxy(),
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          ...(process.env.BROWSER_PROXY ? [] : ['--no-proxy-server']),
-        ],
-        ...opts,
-      });
-      log('launched', JSON.stringify(opts));
-      return browser;
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error('no Chrome/Edge found; set CHROME_PATH');
-}
-
 async function oneAttempt() {
-  const browser = await launch();
+  const browser = await launchBrowser({ headless: HEADLESS, log });
   let context = null;
   try {
-    context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    context = await createStealthContext(browser);
     const page = await context.newPage();
     log('opening https://console.groq.com/signup');
     await page.goto('https://console.groq.com/signup', {

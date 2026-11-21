@@ -53,8 +53,10 @@ Network:
   --insecure               skip TLS certificate verification
 
 Browser helpers / timing:
-  --headless               run telemetry/Turnstile helpers headless
-  --headed                 force visible browser (overrides config)
+  --headless               hidden browser: real Chrome, window off-screen (default)
+  --headed                 show the browser window (overrides config)
+                           TRUE_HEADLESS=1 with --headless forces Chromium headless
+                           (faster, but Groq rejects its fingerprint)
   --command-timeout SEC    timeout for telemetry/captcha helpers (default 180)
   --sitekey KEY            Turnstile sitekey
   --page-url URL           /keys page URL for the Turnstile solver

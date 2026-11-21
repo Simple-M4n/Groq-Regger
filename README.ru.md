@@ -21,6 +21,8 @@ cookie и токены magic-ссылки в результаты не попа�
   (`tools/turnstile.js`) с внутренними повторами.
 - Временная почта: `tempmail_lol` (проверено), `mailtm` или произвольный JSON-инбокс.
 - Прокси HTTP/HTTPS/SOCKS с ротацией round-robin (для HTTP и браузерных хелперов).
+- Скрытый браузер по умолчанию: настоящий Chrome с окном за пределами экрана
+  (окно не видно, но fingerprint как у обычного браузера).
 - Тихий вывод по умолчанию; `--verbose` включает подробную диагностику.
 - В репозитории нет реальных ключей, почт и машинных путей.
 
@@ -46,8 +48,11 @@ node groq-regger.js --count 1
 node groq-regger.js --count 10 --proxy-file proxies.txt
 ```
 
-Оставляйте браузер видимым (`headless: false` по умолчанию). Headless-telemetry
-часто даёт fingerprint, который Groq считает ботом (`signup_blocked`).
+Браузер скрыт по умолчанию (`headless: true`): запускается обычный Chrome, но его
+окно уходит далеко за экран — на рабочем столе ничего не появляется, а
+fingerprint остаётся как у видимого браузера. `--headed` показывает окно.
+`TRUE_HEADLESS=1` включает настоящий headless Chromium, но Groq сейчас отклоняет
+его fingerprint (`signup_blocked`).
 
 ## Флаги CLI
 
@@ -74,8 +79,8 @@ Network:
   --insecure               не проверять TLS-сертификат
 
 Browser helpers / timing:
-  --headless               headless-хелперы (не рекомендуется)
-  --headed                 принудительно видимый браузер
+  --headless               скрыть окно браузера (по умолчанию; Chrome вне экрана)
+  --headed                 показать окно браузера
   --command-timeout SEC    таймаут telemetry/captcha (по умолчанию 180)
   --sitekey KEY            sitekey Turnstile
   --page-url URL           URL страницы /keys для солвера
@@ -102,7 +107,7 @@ Misc:
   "captchaCommand": "node tools/turnstile.js",
   "telemetryCommand": "node tools/telemetry.js",
   "proxyFile": null,
-  "headless": false,
+  "headless": true,
   "verbose": false
 }
 ```
@@ -153,7 +158,7 @@ Misc:
 
 | Симптом | Причина / решение |
 |---|---|
-| `signup_blocked` | headless-telemetry или заблокированный домен почты; держите браузер видимым и используйте `tempmail_lol` |
+| `signup_blocked` | риск-движок Groq: у скрытого режима тот же fingerprint, что у видимого, но повторные регистрации с одного IP режутся — используйте `--proxy-file proxies.txt` и `tempmail_lol` |
 | `CF token is required` | токен Turnstile уже использован; хелпер повторяет попытку, плюс ретрай аккаунта создаёт новую сессию |
 | `page closed while waiting for a button` | Chrome упал; `tools/turnstile.js` повторяет до 3 раз |
 | `timed out waiting for the login email` | проблема почтового провайдера или другой subject; увеличьте `--email-timeout` |

@@ -15,8 +15,11 @@ working Groq **API key** (`gsk_…`), not a token or cookie.
 - Node.js 18+ (tested on Node 26). No Rust, no build step.
 - Helper dependency: `playwright-core` in `tools/` (`cd tools; npm i`).
   Playwright browsers are not downloaded; installed Chrome/Edge is used.
-- Keep the browser visible: `headless: false`. Headless telemetry frequently
-  causes `signup_blocked`.
+- Hidden browser is the default: `headless: true`. This is a **headed** Chrome
+  with `--window-position=-2400,-2400`, so no window is visible but the
+  fingerprint is byte-for-byte identical to a visible browser (verified with a
+  signal-by-signal comparison). Real Chromium headless (`TRUE_HEADLESS=1`) has a
+  different fingerprint and gets `signup_blocked`.
 - If `npm.ps1` is blocked by PowerShell policy, run npm via its CLI script, e.g.
   `node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" i`.
 
@@ -76,7 +79,7 @@ Copy `config.example.json` to `config.json`. Key fields:
   "captchaCommand": "node tools/turnstile.js",
   "telemetryCommand": "node tools/telemetry.js",
   "proxyFile": null,
-  "headless": false,
+  "headless": true,
   "verbose": false
 }
 ```
@@ -115,7 +118,9 @@ Authorization: Bearer <key>
 ## 7. Don't break
 
 - Keep `exposed_secret_key` as the success value; never emit a session token.
-- Keep the browser visible by default; headless telemetry breaks signup.
+- Keep `headless: true` (off-screen headed Chrome); true headless breaks signup.
+- If `signup_blocked` appears even in `--headed` mode, the IP/device is
+  rate-limited by Groq after several signups — wait or use proxies.
 - Keep secrets and machine paths out of tracked files (`out/`, `config.json`,
   `proxies.txt` are ignored).
 - Keep the stdout contract of the tools: token/ID on the last stdout line,
