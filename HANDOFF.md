@@ -18,8 +18,9 @@ working Groq **API key** (`gsk_…`), not a token or cookie.
 - Hidden browser is the default: `headless: true`. This is a **headed** Chrome
   with `--window-position=-2400,-2400`, so no window is visible but the
   fingerprint is byte-for-byte identical to a visible browser (verified with a
-  signal-by-signal comparison). Real Chromium headless (`TRUE_HEADLESS=1`) has a
-  different fingerprint and gets `signup_blocked`.
+  signal-by-signal comparison); on Windows the off-screen window is additionally
+  hidden from the taskbar with `ShowWindow(SW_HIDE)`. Real Chromium headless
+  (`TRUE_HEADLESS=1`) has a different fingerprint and gets `signup_blocked`.
 - If `npm.ps1` is blocked by PowerShell policy, run npm via its CLI script, e.g.
   `node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" i`.
 
@@ -119,6 +120,11 @@ Authorization: Bearer <key>
 
 - Keep `exposed_secret_key` as the success value; never emit a session token.
 - Keep `headless: true` (off-screen headed Chrome); true headless breaks signup.
+- The batch is fail-fast: `signup_blocked` or a mail HTTP 429 stops the run
+  instead of looping over attempts — do not turn it back into a retry loop.
+- The hidden window is moved off-screen and hidden from the taskbar on Windows
+  (no-op elsewhere); after `ShowWindow(SW_HIDE)` the fingerprint must stay
+  identical to a visible browser.
 - If `signup_blocked` appears even in `--headed` mode, the IP/device is
   rate-limited by Groq after several signups — wait or use proxies.
 - Keep secrets and machine paths out of tracked files (`out/`, `config.json`,

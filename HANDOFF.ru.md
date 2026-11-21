@@ -17,8 +17,10 @@
   Браузеры Playwright не скачиваются — используется установленный Chrome/Edge.
 - Скрытый браузер включён по умолчанию: `headless: true`. Это **обычный** Chrome
   с `--window-position=-2400,-2400`: окно не видно, но все сигналы fingerprint
-  совпадают с видимым браузером (проверено посегментно). Настоящий headless
-  Chromium (`TRUE_HEADLESS=1`) даёт другой fingerprint и `signup_blocked`.
+  совпадают с видимым браузером (проверено посегментно), а на Windows окно
+  дополнительно прячется из панели задач через `ShowWindow(SW_HIDE)`. Настоящий
+  headless Chromium (`TRUE_HEADLESS=1`) даёт другой fingerprint и
+  `signup_blocked`.
 - Если PowerShell блокирует `npm.ps1`, запускайте npm через CLI-скрипт, например
   `node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" i`.
 
@@ -120,6 +122,11 @@ Authorization: Bearer <key>
   выдавать сессионный токен.
 - `headless: true` = обычный Chrome с окном вне экрана; настоящий headless
   ломает регистрацию.
+- Прогон fail-fast: `signup_blocked` или HTTP 429 от почты сразу останавливает
+  запуск, а не крутит попытки — не превращать обратно в цикл ретраев.
+- Скрытое окно уходит за экран и прячется из панели задач на Windows (на других
+  ОС — без изменений); после `ShowWindow(SW_HIDE)` fingerprint обязан оставаться
+  идентичным видимому браузеру.
 - Если `signup_blocked` появляется даже в `--headed`, IP/устройство временно
   ограничено Groq после нескольких регистраций — подождите или используйте
   прокси.

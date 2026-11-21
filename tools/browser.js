@@ -9,8 +9,43 @@
 // but Groq currently rejects its fingerprint with signup_blocked).
 
 const { chromium } = require('playwright-core');
+const { execFile } = require('node:child_process');
 
 const TRUE_HEADLESS = process.env.TRUE_HEADLESS === '1';
+
+// An off-screen window still shows a taskbar button. On Windows hide it
+// completely with ShowWindow(SW_HIDE); rendering and visibilityState stay
+// normal, so the fingerprint is unchanged. Playwright 1.65 exposes no browser
+// pid, so we target Chrome/Edge top-level windows that sit fully off-screen —
+// only our helper windows are ever placed there.
+function hideBrowserWindows() {
+  if (process.platform !== 'win32') return;
+  const ps = [
+    `Add-Type -TypeDefinition @'`,
+    `using System;`,
+    `using System.Runtime.InteropServices;`,
+    `public class WH {`,
+    `  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }`,
+    `  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);`,
+    `  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);`,
+    `}`,
+    `'@`,
+    `$n = 0`,
+    `Get-Process chrome,msedge -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } |`,
+    `  ForEach-Object {`,
+    `    $r = New-Object WH+RECT`,
+    `    if ([WH]::GetWindowRect($_.MainWindowHandle, [ref]$r) -and $r.Right -le 0) {`,
+    `      if ([WH]::ShowWindow($_.MainWindowHandle, 0)) { $n++ }`,
+    `    }`,
+    `  }`,
+    `if ($n -gt 0) { Write-Output ("hid " + $n) }`,
+  ].join('\n');
+  const run = () => {
+    execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], () => {});
+  };
+  setTimeout(run, 800);
+  setTimeout(run, 3500);
+}
 
 function browserProxy(log = () => {}) {
   const raw = process.env.BROWSER_PROXY || '';
@@ -57,6 +92,7 @@ async function launchBrowser({ headless, log = () => {} } = {}) {
         ...opts,
       });
       log('launched', JSON.stringify(opts), hidden ? 'hidden (off-screen headed)' : (headless ? 'true-headless' : 'headed'));
+      if (hidden && process.env.NO_WINDOW_HIDE !== '1') hideBrowserWindows();
       return browser;
     } catch (e) {
       lastErr = e;

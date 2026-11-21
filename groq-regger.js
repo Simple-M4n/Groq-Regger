@@ -259,8 +259,10 @@ async function main() {
 
   const rotator = createRotator(cfg.proxyList, true);
   let ok = 0;
+  let blocked = false;
+  const signupBlocked = /signup_blocked|signup error/i;
 
-  for (let i = 1; i <= cfg.count; i += 1) {
+  for (let i = 1; i <= cfg.count && !blocked; i += 1) {
     const accountProxy = rotator ? rotator.next() : cfg.proxy;
     log(`account ${i}/${cfg.count} via ${describeProxy(accountProxy)}`);
 
@@ -281,10 +283,29 @@ async function main() {
         ok += 1;
         done = true;
       } catch (err) {
-        console.error(`error: account ${i} attempt ${attempt}: ${err.message}`);
+        const msg = String(err.message || '');
+        console.error(`error: account ${i} attempt ${attempt}: ${msg}`);
+        // Two conditions make every following attempt pointless:
+        //  - Groq's risk engine will not take this IP/device right now;
+        //  - the mail provider returned 429 (free-tier quota).
+        // Retrying immediately only burns browser launches/mail quota.
+        if (signupBlocked.test(msg)) {
+          blocked = true;
+          console.error('stop: Groq is rate-limiting this IP/device (signup_blocked)');
+          console.error('hint: wait a while, or rerun with --proxy-file proxies.txt');
+          break;
+        }
+        if (/rate limited|HTTP 429/i.test(msg)) {
+          blocked = true;
+          console.error('stop: mail provider rate limit (HTTP 429)');
+          console.error('hint: wait for the free quota to reset, use --proxy-file proxies.txt,');
+          console.error('      or switch provider in config (mailtm / api)');
+          break;
+        }
       }
     }
 
+    if (blocked) break;
     if (i < cfg.count) await new Promise((resolve) => setTimeout(resolve, cfg.intervalMs));
   }
 

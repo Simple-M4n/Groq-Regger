@@ -22,8 +22,9 @@ cookies and magic-link tokens are never written to the result files.
   with internal retries.
 - Temporary mail: `tempmail_lol` (verified), `mailtm`, or a generic JSON inbox.
 - HTTP/HTTPS/SOCKS proxies with round-robin rotation (HTTP API and browsers).
-- Hidden browser by default: real Chrome window placed off-screen (no visible
-  window, but a genuine browser fingerprint).
+- Hidden browser by default: real Chrome window placed off-screen and hidden
+  from the taskbar on Windows (no visible window, but a genuine browser
+  fingerprint).
 - Quiet normal output; `--verbose` enables step-by-step diagnostics.
 - No real credentials, keys or machine paths in this repository.
 
@@ -160,7 +161,8 @@ See [HANDOFF.md](HANDOFF.md) for exact endpoints, headers and failure modes.
 
 | Symptom | Cause / fix |
 |---|---|
-| `signup_blocked` | Groq risk engine; hidden mode has the same fingerprint as visible, but repeated signups from one IP get rate-limited — use `--proxy-file proxies.txt` and `tempmail_lol` |
+| `signup_blocked` | Groq risk engine; hidden mode has the same fingerprint as visible, but repeated signups from one IP get rate-limited — use `--proxy-file proxies.txt` and `tempmail_lol`. The batch stops immediately instead of burning attempts |
+| `Rate limited (free)` from `api.tempmail.lol` | free-tier inbox quota is used up — wait for the reset, use `--proxy-file`, or switch `provider` to `mailtm`/`api` |
 | `CF token is required` | Turnstile token was consumed; the helper retries automatically, an account retry also starts a fresh session |
 | `page closed while waiting for a button` | Chrome crashed; `tools/turnstile.js` retries up to 3 times |
 | `timed out waiting for the login email` | mail provider issue or wrong subject; increase `--email-timeout` |
