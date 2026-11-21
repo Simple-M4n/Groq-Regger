@@ -1,72 +1,78 @@
 # groq-regger
 
-Реггер аккаунтов под console.groq.com на Rust. Не «одноразовый скрипт под текущую
-вёрстку», а движок флоу: шаги регистрации описаны в TOML-рецепте, код умеет
-HTTP-шаги, ожидание письма, решение капчи, прокси-ротацию и выгрузку результатов.
-Меняются маршруты у сервиса — правится рецепт, не код.
+**English** | [Русский](README.ru.md)
 
-## Состав
+An account registrator for `console.groq.com` written in Rust. This is not a
+one-off script tied to the current markup, but a flow engine: registration steps
+are described in a TOML recipe, while the code handles HTTP steps, email
+waiting, captcha solving, proxy rotation and result export. When the service
+changes its routes, you edit the recipe — not the code.
+
+The result of a successful run is a working **Groq API key**
+(`exposed_secret_key`, i.e. `gsk_…`), not a session token or cookie.
+
+## Contents
 
 ```
 src/
   main.rs      CLI: run / check / gen / domains
   config.rs    config.toml (run, http, captcha, email)
-  recipe.rs    TOML-рецепт флоу + статическая валидация подстановок
-  flow.rs      исполнитель шагов: http, email_wait, sleep; extract-правила
-  runner.rs    пул воркеров, ретраи, джиттер, запись результатов
-  http.rs      сборка reqwest-клиента: UA-профиль, cookie jar, прокси
+  recipe.rs    TOML flow recipe + static validation of substitutions
+  flow.rs      step executor: http, email_wait, sleep; extract rules
+  runner.rs    worker pool, retries, jitter, result writer
+  http.rs      reqwest client: UA profile, cookie jar, proxy
   captcha.rs   capsolver / 2captcha (Turnstile, reCAPTCHA v2/v3, hCaptcha)
-  email.rs     приём почты: IMAP catch-all, mail.tm, произвольный JSON API
-  identity.rs  генерация имени/логина/пароля
-  store.rs     JSONL-результаты + отдельный файл ключей
-  util.rs      шаблоны {{var}}, JSON-пути, regex-извлечение
+  email.rs     email receiving: IMAP catch-all, mail.tm, arbitrary JSON API
+  identity.rs  name / login / password generation
+  store.rs     JSONL results + separate key file
+  util.rs      {{var}} templates, JSON paths, regex extraction
 recipes/
-  groq.toml    сам флоу Groq
+  groq.toml    the Groq flow itself
 tools/
-  telemetry.js  настоящий Stytch telemetry-id
-  turnstile.js  локальный решатель Turnstile через Chrome
+  telemetry.js  real Stytch telemetry ID
+  turnstile.js  local Turnstile solver via Chrome
 ```
 
-## Сборка
+## Build
 
 ```bash
 cargo build --release
-# бинарник: target/release/groq-regger(.exe)
+# binary: target/release/groq-regger(.exe)
 ```
 
-Минимальный профиль: `rustup toolchain install stable`. Под Windows без MSVC
-ставится GNU-хост (`rustup-init --default-host x86_64-pc-windows-gnu`) при
-наличии mingw-w64 `gcc` в PATH.
+Minimal profile: `rustup toolchain install stable`. On Windows without MSVC,
+use the GNU host (`rustup-init --default-host x86_64-pc-windows-gnu`) with
+mingw-w64 `gcc` in PATH.
 
-## Быстрый старт
+## Quick start
 
 ```bash
-cp config.example.toml config.toml     # заполнить почту/капчу/прокси
-cp proxies.example.txt proxies.txt     # опционально
+cp config.example.toml config.toml     # fill in email / captcha / proxies
+cp proxies.example.txt proxies.txt     # optional
 
-groq-regger check                      # валидация рецепта и окружения
-groq-regger run -n 1 --dry-run         # рендер шагов без сети
-groq-regger run -n 10 -c 4             # 10 регистраций, 4 параллельно
+groq-regger check                      # validate recipe and environment
+groq-regger run -n 1 --dry-run         # render steps without network calls
+groq-regger run -n 10 -c 4             # 10 registrations, 4 in parallel
 ```
 
-`run` пишет:
+`run` writes:
 
-- `out/groq-<stamp>.jsonl` — по строке на попытку: email, пароль, api_key,
-  прокси, длительность, все переменные флоу;
-- `out/groq-<stamp>.keys.txt` — `ключ<TAB>email` только для успешных.
+- `out/groq-<stamp>.jsonl` — one line per attempt: email, password, api_key,
+  proxy, duration and all flow variables;
+- `out/groq-<stamp>.keys.txt` — `key<TAB>email` for successful runs only.
 
-## Рецепт: модель шагов
+## Recipe: the step model
 
 ```toml
 [[step]]
-name   = "signup"          # метка в логах
-type   = "http"            # http (по умолчанию) | email_wait | sleep
+name   = "signup"          # label in logs
+type   = "http"            # http (default) | email_wait | sleep
 method = "POST"
-path   = "/api/auth/sign-up/email"   # относительный к meta.base_url либо полный URL
+path   = "/api/auth/sign-up/email"   # relative to meta.base_url or a full URL
 headers = { referer = "https://console.groq.com/signup" }
 json   = { email = "{{email}}", password = "{{password}}" }
-expect_status   = [200, 201, 204]    # по умолчанию любой 2xx
-capture_cookies = true               # разложить cookie в {{cookie_<name>}}
+expect_status   = [200, 201, 204]    # any 2xx by default
+capture_cookies = true               # split cookies into {{cookie_<name>}}
 extract = { api_key = "json:$.key" }
 
 [[step]]
@@ -78,59 +84,60 @@ timeout_secs     = 180
 save_as          = "verify_link"
 ```
 
-Подстановки: `{{first_name}} {{last_name}} {{email}} {{local_part}} {{password}}
-{{uuid}} {{ts}} {{proxy}} {{captcha}}` плюс всё, что положили предыдущие шаги
-через `extract` / `save_as` / `capture_cookies`.
+Substitutions: `{{first_name}} {{last_name}} {{email}} {{local_part}} {{password}}
+{{uuid}} {{ts}} {{proxy}} {{captcha}}` plus everything previous steps put there
+via `extract` / `save_as` / `capture_cookies`.
 
-Правила `extract`:
+`extract` rules:
 
-| Правило | Смысл |
+| Rule | Meaning |
 |---|---|
-| `json:$.a.b[0].c` | путь в JSON-ответе |
-| `regex:...` | первая группа (или весь матч) в теле |
-| `header:x-csrf` | заголовок ответа |
-| `cookie:name` | cookie из общего jar |
-| `status` / `url` / `raw` | код, URL, тело целиком |
+| `json:$.a.b[0].c` | path in the JSON response |
+| `regex:...` | first capture group (or the whole match) in the body |
+| `header:x-csrf` | response header |
+| `cookie:name` | cookie from the shared jar |
+| `status` / `url` / `raw` | status code, URL, whole body |
 
-Капча в HTTP-шаге: `captcha = "turnstile"`, `sitekey = "0x…"`, опционально
-`page_url` и `captcha_var` (куда положить токен, по умолчанию `{{captcha}}`).
+Captcha in an HTTP step: `captcha = "turnstile"`, `sitekey = "0x…"`, optional
+`page_url` and `captcha_var` (where to put the token; default `{{captcha}}`).
 
-Переменная `meta.success_var` (по умолчанию `api_key`) — то, что попадёт в
-`api_key` результата и в `.keys.txt`.
+The `meta.success_var` variable (default `api_key`) is what goes into the
+result's `api_key` and into `.keys.txt`.
 
-## Почта
+## Email
 
-- `imap` — catch-all домен. При открытии ящика уже лежащие письма
-  помечаются как seen по UID, дальше читаются только новые; MIME декодируется
-  (QP, encoded-word), ссылки и коды достаются regex-ом из тела.
-- `mailtm` — публичный mail.tm: домен берётся из API, ящик создаётся на лету.
-  Для Groq-подобных сервисов публичные домены обычно в блок-листах, так что это
-  режим для отладки флоу, не для объёма.
-- `tempmail_lol` — `api.tempmail.lol`: адрес выдаёт сам сервис на `/generate`,
-  чтение через `/auth/<token>`. Домены вида `*.roomsranked.com` проходят
-  регистрацию Groq (проверено), но сервис без гарантий uptime.
-- `api` — любой HTTP-JSON-инбокс (свой сервис, mailhook, 1secmail-совместимый):
-  `list_url` c `{email}`, опциональный `detail_url` c `{id}`, поля настраиваются.
+- `imap` — catch-all domain. Messages already in the mailbox are marked as seen
+  by UID on open, then only new ones are read; MIME is decoded (QP,
+  encoded-word), links and codes are extracted with regex from the body.
+- `mailtm` — public mail.tm: the domain comes from the API, mailbox is created
+  on the fly. For Groq-like services public domains are usually blocklisted, so
+  this mode is for debugging the flow, not for volume.
+- `tempmail_lol` — `api.tempmail.lol`: the address is issued by the service on
+  `/generate`, reading via `/auth/<token>`. Domains like `*.roomsranked.com`
+  pass Groq registration (verified), but the service has no uptime guarantees.
+- `api` — any HTTP-JSON inbox (your own service, mailhook, 1secmail-compatible):
+  `list_url` with `{email}`, optional `detail_url` with `{id}`, configurable
+  fields.
 
-## Капча
+## Captcha
 
-Встроены `capsolver` (AntiTurnstileTaskProxyLess / ReCaptchaV2|V3 / HCaptcha),
-`twocaptcha` и `command`. Ключ — в `[captcha] api_key`.
+Built-in solvers: `capsolver` (AntiTurnstileTaskProxyLess / ReCaptchaV2|V3 /
+HCaptcha), `twocaptcha` and `command`. The key is in `[captcha] api_key`.
 
-`provider = "none"` — флоу без капчи: шаг с `captcha = …` без солвера падает с
-внятной ошибкой, но при `captcha_optional = true` (так помечен Turnstile на
-создании ключа) сначала пробует запрос без токена.
+`provider = "none"` — a flow without a captcha: a step with `captcha = …` and no
+solver fails with a clear error, but with `captcha_optional = true` (used for the
+Turnstile on key creation) it first tries the request without a token.
 
-### Бесплатный Turnstile через свой браузер
+### Free Turnstile via your own browser
 
-`provider = "command"` запускает внешнюю программу и берёт токен из последней
-непустой строки stdout. Программе передаются env-переменные `CAPTCHA_KIND`,
-`CAPTCHA_SITEKEY`, `CAPTCHA_PAGE_URL`, `CAPTCHA_ACTION` и `CAPTCHA_VARS` (JSON
-со всеми переменными рецепта, включая `session_jwt`).
+`provider = "command"` runs an external program and takes the token from the
+last non-empty stdout line. The program receives env variables `CAPTCHA_KIND`,
+`CAPTCHA_SITEKEY`, `CAPTCHA_PAGE_URL`, `CAPTCHA_ACTION` and `CAPTCHA_VARS` (JSON
+with all recipe variables, including `session_jwt`).
 
 ```powershell
 cd tools
-npm i                 # playwright-core, без скачивания браузеров
+npm i                 # playwright-core, no browser download
 ```
 
 ```toml
@@ -139,40 +146,45 @@ provider = "command"
 command  = "node tools/turnstile.js"
 ```
 
-`tools/turnstile.js` открывает установленный Chrome/Edge (не headless), ставит
-cookie `stytch_session_jwt` и `stytch_session`, заходит на `/keys`, жмёт
-«Create API Key», ждёт прохождения Turnstile и печатает `cfToken`. Запрос UI к
-`/api/vb-token/create` перехватывается и отменяется, чтобы одноразовый токен не
-сгорел до вызова из рецепта. Если браузера нет в PATH — задай `CHROME_PATH`.
+`tools/turnstile.js` opens an installed Chrome/Edge (non-headless), sets the
+`stytch_session_jwt` and `stytch_session` cookies, goes to `/keys`, clicks
+«Create API Key», waits for Turnstile to pass and prints `cfToken`. The UI
+request to `/api/vb-token/create` is intercepted and cancelled so the one-shot
+token is not burned before the recipe uses it. If the browser is not in PATH,
+set `CHROME_PATH`.
 
-### Настоящий telemetry-id (обязательно)
+### Real telemetry ID (required)
 
-Пустой `POST https://gste.groq.io/submit` возвращает UUID, но без fingerprint —
-на `signupb2b` Groq отвечает `400 code=signup_blocked`. Шаг `get-telemetry-id`
-имеет `type = "command"` и запускает `node tools/telemetry.js`: скрипт открывает
-`console.groq.com/signup` в Chrome и вызывает настоящий `window.GetTelemetryID`
-из Stytch telemetry.js. С таким ID регистрация проходит (проверено).
+An empty `POST https://gste.groq.io/submit` returns a UUID, but without a
+fingerprint — `signupb2b` then answers `400 code=signup_blocked`. The
+`get-telemetry-id` step has `type = "command"` and runs `node tools/telemetry.js`:
+the script opens `console.groq.com/signup` in Chrome and calls the real
+`window.GetTelemetryID` from Stytch telemetry.js. With such an ID registration
+passes (verified).
 
-## Поведение и лимиты
+## Behaviour and limits
 
-- `run.concurrency` воркеров, `run.delay_ms_min/max` джиттер перед каждой попыткой.
-- `run.max_attempts` — попыток на одну регистрацию, каждая с новой почтой и
-  (при наличии) следующим прокси из пула.
-- 429 и 5xx помечаются retryable; ошибки рецепта (неожиданный статус, пустой
-  extract) тоже ретраятся, но причина пишется в лог и в `error` записи.
-- Прокси: одна строка — один прокси, `http://` / `socks5://`, round-robin.
+- `run.concurrency` workers, `run.delay_ms_min/max` jitter before each attempt.
+- `run.max_attempts` — attempts per registration, each with a fresh email and
+  (when available) the next proxy from the pool.
+- 429 and 5xx are marked retryable; recipe errors (unexpected status, empty
+  extract) are retried too, but the reason is written to the log and to the
+  record's `error` field.
+- Proxies: one proxy per line, `http://` / `socks5://`, round-robin.
 
-## Ограничения
+## Limitations
 
-Флоу Groq — **magic link** (Stytch B2B Discovery): email → письмо «Your login
-request to Groq» → токен из ссылки → обмен на intermediate session → регистрация
-в `api.groq.com/platform/v1` → API-ключ. Пароля и капчи на форме входа нет.
+The Groq flow is a **magic link** flow (Stytch B2B Discovery): email → the
+«Your login request to Groq» message → token from the link → exchange for an
+intermediate session → registration in `api.groq.com/platform/v1` → API key.
+There is no password and no captcha on the login form.
 
-Все сетевые пути и имена полей сверены с бандлом консоли, bootstrap-ответом
-Stytch и живым прогоном. Ответ `discovery/authenticate` завёрнут в `data`
-(`$.data.intermediate_session_token`). Единственная капча в цепочке — Turnstile
-на создании ключа (`/keys`); она решается бесплатным `command`-провайдером.
+All network paths and field names were checked against the console bundle, the
+Stytch bootstrap response and a live run. The `discovery/authenticate` response
+is wrapped in `data` (`$.data.intermediate_session_token`). The only captcha in
+the chain is Turnstile on key creation (`/keys`); it is solved by the free
+`command` provider.
 
-Проверено end-to-end: `run -n 1` создаёт аккаунт и рабочий ключ
-(`GET /openai/v1/models` → 200). Публичный домен почты может быть в блок-листе
-Groq — тогда `signup_blocked`; `tempmail.lol` сейчас проходит.
+Verified end-to-end: `run -n 1` creates an account and a working key
+(`GET /openai/v1/models` → 200). A public email domain may be blocklisted by
+Groq — then you get `signup_blocked`; `tempmail.lol` currently passes.
