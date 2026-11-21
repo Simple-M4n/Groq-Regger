@@ -1,0 +1,4 @@
+# One proxy per line. Scheme optional (defaults to http://).
+# http://user:pass@host:port
+# socks5://user:pass@host:port
+# 1.2.3.4:8080

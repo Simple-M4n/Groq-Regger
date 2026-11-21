@@ -1,0 +1,8 @@
+/target
+/out
+/notes
+node_modules/
+config.toml
+proxies.txt
+*.log
+*.keys.txt

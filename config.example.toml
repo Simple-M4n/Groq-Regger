@@ -1,0 +1,54 @@
+# ── groq-regger ────────────────────────────────────────────────────────────────
+# Скопируй в config.toml и заполни. Пути относительны каталога этого файла.
+
+[run]
+recipe         = "recipes/groq.toml"
+out_dir        = "out"
+concurrency    = 4        # сколько регистраций параллельно
+delay_ms_min   = 700       # джиттер перед каждой попыткой
+delay_ms_max   = 2400
+max_attempts   = 2         # попыток на одну регистрацию (каждая с новой почтой)
+proxies_file   = "proxies.txt"
+
+[http]
+timeout_secs    = 45
+accept_language = "en-US,en;q=0.9"
+# user_agents = []         # при пустом списке берётся встроенный пул Chrome
+
+[captcha]
+# capsolver | twocaptcha | command | none
+# command = бесплатный локальный вариант: скрипт печатает токен в stdout
+#   cd tools; npm i; затем provider = "command"
+provider          = "capsolver"
+api_key           = ""
+command           = "node tools/turnstile.js"
+page_url          = "https://console.groq.com/keys"
+action            = "verify"      # только для reCAPTCHA v3
+poll_interval_secs = 3
+timeout_secs      = 180
+
+[email]
+provider = "imap"          # imap | mailtm | tempmail_lol | api
+domains  = ["mail.yourdomain.tld"]
+
+[email.imap]
+host     = "mail.yourdomain.tld"
+port     = 993
+user     = "catchall@yourdomain.tld"
+password = ""
+mailbox  = "INBOX"
+
+[email.mailtm]
+# base_url = "https://api.mail.tm"
+
+[email.tempmail_lol]
+# base_url = "https://api.tempmail.lol"
+
+[email.api]
+list_url   = "https://inbox.example/api/messages?to={email}"
+detail_url = ""            # необязательно, {id}
+token      = ""
+items_path = ""            # например "data"
+id_field      = "id"
+subject_field = "subject"
+body_field    = "text"

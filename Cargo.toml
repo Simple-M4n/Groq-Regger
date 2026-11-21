@@ -1,0 +1,46 @@
+[package]
+name = "groq-regger"
+version = "0.1.0"
+edition = "2021"
+description = "Recipe-driven account registrator (Groq console flow)"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
+imap = "2"
+native-tls = "0.2"
+rand = "0.8"
+regex = "1"
+ring = "0.17"
+reqwest = { version = "0.12", default-features = false, features = [
+    "cookies",
+    "gzip",
+    "brotli",
+    "rustls-tls",
+    "json",
+    "socks",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "time",
+    "sync",
+    "fs",
+    "io-util",
+    "process",
+] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

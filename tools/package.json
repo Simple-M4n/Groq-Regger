@@ -1,0 +1,8 @@
+{
+  "name": "groq-regger-tools",
+  "private": true,
+  "description": "Local helpers for groq-regger (free Turnstile token via installed Chrome)",
+  "dependencies": {
+    "playwright-core": "^1.40.0"
+  }
+}
