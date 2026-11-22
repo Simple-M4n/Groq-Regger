@@ -11,9 +11,10 @@
   "scripts": {
     "start": "node groq-regger.js",
     "selftest": "node groq-regger.js --selftest",
-    "test": "node test/groq.test.js"
+    "test": "node --test test/groq.test.js test/cli.mjs test/store.mjs test/mail.mjs test/commands.mjs test/groq-client.mjs test/browser-proxy.mjs",
+    "test:unit": "node --test test/groq.test.js test/cli.mjs test/store.mjs test/mail.mjs test/commands.mjs test/groq-client.mjs test/browser-proxy.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }

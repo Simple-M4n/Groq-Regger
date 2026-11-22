@@ -12,7 +12,8 @@
 
 ## 1. Окружение
 
-- Node.js 18+ (проверено на Node 26). Rust и сборка не нужны.
+- Node.js 20+ (проверено на Node 26; требуется `playwright-core` 1.65). Rust и
+  сборка не нужны.
 - Зависимость хелперов: `playwright-core` в `tools/` (`cd tools; npm i`).
   Браузеры Playwright не скачиваются — используется установленный Chrome/Edge.
 - Скрытый браузер включён по умолчанию: `headless: true`. Это **обычный** Chrome
@@ -61,7 +62,7 @@ lib/commands.js     запуск внешних команд, обёртки tel
 lib/groq.js         10 шагов флоу; в результате только API-ключ
 lib/store.js        дописывание JSONL и файла ключей
 tools/*.js          браузерные хелперы (CommonJS, tools/node_modules)
-test/groq.test.js   юнит-проверки (node test/groq.test.js)
+test/*.mjs          юнит-проверки (npm test / npm run test:unit)
 ```
 
 В записи намеренно нет `session_jwt`, `session_token`, cookie и токенов ссылки.
@@ -86,7 +87,10 @@ test/groq.test.js   юнит-проверки (node test/groq.test.js)
 ```
 
 Флаги CLI перекрывают значения конфига. Прокси ротируются по аккаунтам и
-передаются браузерным хелперам через `BROWSER_PROXY`.
+передаются браузерным хелперам через `BROWSER_PROXY`, а `proxyBypass` /
+`insecure` — через `BROWSER_PROXY_BYPASS` / `BROWSER_INSECURE`. Числовые флаги
+проверяются строго. `appendAccount()` записывает JSONL и файл ключей как одну
+операцию с откатом при ошибке.
 
 ## 5. Надёжность Turnstile
 
@@ -102,7 +106,8 @@ test/groq.test.js   юнит-проверки (node test/groq.test.js)
 ## 6. Приёмка
 
 ```bash
-node groq-regger.js --selftest
+npm test                              # юнит-проверки без браузера
+node groq-regger.js --selftest        # сеть/почта/модули (создаёт тестовый ящик)
 node groq-regger.js --count 1 --attempts 1 --verbose
 node groq-regger.js --count 10 --proxy-file proxies.txt
 ```

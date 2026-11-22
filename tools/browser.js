@@ -55,6 +55,7 @@ function browserProxy(log = () => {}) {
     const result = { server: `${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}` };
     if (u.username) result.username = decodeURIComponent(u.username);
     if (u.password) result.password = decodeURIComponent(u.password);
+    if (process.env.BROWSER_PROXY_BYPASS) result.bypass = process.env.BROWSER_PROXY_BYPASS;
     return result;
   } catch (e) {
     log('invalid BROWSER_PROXY:', e.message);
@@ -87,6 +88,7 @@ async function launchBrowser({ headless, log = () => {} } = {}) {
             ]
             : []),
           ...(headless && TRUE_HEADLESS ? ['--headless=new'] : []),
+          ...(process.env.BROWSER_INSECURE === '1' ? ['--ignore-certificate-errors'] : []),
           ...(process.env.BROWSER_PROXY ? [] : ['--no-proxy-server']),
         ],
         ...opts,
@@ -104,12 +106,14 @@ async function launchBrowser({ headless, log = () => {} } = {}) {
 async function createStealthContext(browser) {
   // A plain context gave a valid fingerprint before; aggressive spoofing
   // (fake UA/plugins) is itself a bot signal, so keep headful/hidden pristine.
+  const ignoreHTTPSErrors = process.env.BROWSER_INSECURE === '1';
   if (!TRUE_HEADLESS) {
-    return browser.newContext({ viewport: { width: 1280, height: 900 } });
+    return browser.newContext({ viewport: { width: 1280, height: 900 }, ignoreHTTPSErrors });
   }
   const major = String(browser.version() || '131').split('.')[0];
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
+    ignoreHTTPSErrors,
     locale: 'en-US',
     timezoneId: 'America/New_York',
     userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 `

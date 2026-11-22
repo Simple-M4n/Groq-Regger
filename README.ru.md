@@ -2,7 +2,7 @@
 
 [English](README.md) | **Русский**
 
-Реггер аккаунтов `console.groq.com` на чистом JavaScript (Node.js 18+). Без Rust
+Реггер аккаунтов `console.groq.com` на чистом JavaScript (Node.js 20+). Без Rust
 и без сборки. Неинтерактивный: настройки — `config.json` и флаги CLI, без
 промптов, TUI и чата.
 
@@ -29,7 +29,7 @@ cookie и токены magic-ссылки в результаты не попа�
 
 ## Требования
 
-- Node.js 18+.
+- Node.js 20+ (требуется `playwright-core` 1.65 в `tools/`).
 - Установленный Chrome или Edge (хелперы используют `playwright-core` с
   системным браузером; браузеры Playwright не скачиваются).
 - Однократная установка зависимости хелперов:
@@ -77,7 +77,7 @@ Network:
   --proxy-type TYPE        тип для голого host:port
   --proxy-file FILE        один прокси на строку, ротация по аккаунтам
   --proxy-bypass LIST      исключения для браузера
-  --insecure               не проверять TLS-сертификат
+  --insecure               не проверять TLS в Node и браузерных хелперах
 
 Browser helpers / timing:
   --headless               скрыть окно браузера (по умолчанию; Chrome вне экрана)
@@ -87,10 +87,14 @@ Browser helpers / timing:
   --page-url URL           URL страницы /keys для солвера
 
 Misc:
-  --selftest               проверки сети и хелперов без регистрации
+  --selftest               проверки сети/почты/хелперов (создаёт тестовый ящик)
   --verbose                подробные логи
   -h, --help               справка
 ```
+
+Числовые флаги проверяются строго: допустимы только целые числа (`3abc`,
+`2.5`, `1e3` и отрицательные значения отклоняются). Оба выходных файла
+записываются вместе; при ошибке записи ключа запись в JSONL откатывается.
 
 ## config.json
 
@@ -113,7 +117,13 @@ Misc:
 }
 ```
 
+`stytchPublicToken` переопределяет токен для Basic-авторизации Stytch.
+`proxyBypass` (хосты через запятую) и `insecure` передаются браузерным хелперам
+через переменные окружения.
+
 `config.json`, `proxies.txt`, `out/` и `notes/` добавлены в `.gitignore`.
+Считайте конфиг доверенным кодом: `telemetryCommand` и `captchaCommand` — это
+строки shell-команд, которые выполняет CLI.
 
 ## Результаты
 
@@ -138,7 +148,8 @@ Misc:
 Один прокси на строку в `proxies.txt`: `http://`, `https://`, `socks4://`,
 `socks4a://`, `socks5://`, `socks5h://`, с авторизацией в виде
 `type://user:pass@host:port`. Ротация — round-robin по аккаунтам. Тот же прокси
-передаётся браузерным хелперам через `BROWSER_PROXY`.
+передаётся браузерным хелперам через `BROWSER_PROXY`; список исключений и
+`--insecure` — через `BROWSER_PROXY_BYPASS` и `BROWSER_INSECURE`.
 
 ## Флоу
 
@@ -169,6 +180,10 @@ Misc:
 ## Тесты
 
 ```bash
-node test/groq.test.js
+npm test          # встроенный node:test, без сети и браузера
+npm run test:unit # тот же набор проверок без браузера
 node groq-regger.js --selftest
 ```
+
+`--selftest` проверяет доступность, создаёт временный ящик и убеждается, что
+`playwright-core` находится в `tools/`; сами браузерные хелперы не запускаются.

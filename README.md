@@ -2,7 +2,7 @@
 
 **English** | [Русский](README.ru.md)
 
-Pure JavaScript (Node.js 18+) registrator for `console.groq.com`. No Rust, no
+Pure JavaScript (Node.js 20+) registrator for `console.groq.com`. No Rust, no
 build step. Non-interactive by design: configuration comes from `config.json`
 plus CLI flags — no prompts, no TUI, no chat.
 
@@ -30,7 +30,7 @@ cookies and magic-link tokens are never written to the result files.
 
 ## Requirements
 
-- Node.js 18 or newer.
+- Node.js 20 or newer (required by `playwright-core` 1.65 in `tools/`).
 - Chrome or Edge installed (the telemetry and Turnstile helpers use
   `playwright-core` with the installed browser; Playwright browsers are not
   downloaded).
@@ -79,7 +79,7 @@ Network:
   --proxy-type TYPE        used when --proxy is a bare host:port
   --proxy-file FILE        one proxy per line, rotated per account
   --proxy-bypass LIST      comma-separated bypass hosts (browser)
-  --insecure               skip TLS certificate verification
+  --insecure               skip TLS checks in Node and browser helpers
 
 Browser helpers / timing:
   --headless               hide browser window (default; real Chrome off-screen)
@@ -89,10 +89,14 @@ Browser helpers / timing:
   --page-url URL           /keys page URL for the solver
 
 Misc:
-  --selftest               connectivity/helper checks, no registration
+  --selftest               network/mailbox/helper checks (creates a test mailbox)
   --verbose                detailed diagnostics
   -h, --help               this help
 ```
+
+Numeric flags are validated strictly: only whole integers are accepted
+(`3abc`, `2.5`, `1e3` and negative values are rejected). Both output files are
+written together; if the key write fails, the JSONL record is rolled back.
 
 ## config.json
 
@@ -115,7 +119,13 @@ Misc:
 }
 ```
 
-`config.json`, `proxies.txt`, `out/` and `notes/` are gitignored.
+`stytchPublicToken` overrides the Basic-auth token used by the Stytch requests.
+`proxyBypass` (comma-separated hosts) and `insecure` are forwarded to the
+browser helpers via environment variables.
+
+`config.json`, `proxies.txt`, `out/` and `notes/` are gitignored. Treat the
+config file as trusted code: `telemetryCommand` and `captchaCommand` are shell
+command strings executed by the CLI.
 
 ## Output
 
@@ -140,7 +150,8 @@ No `session_jwt`, `session_token`, cookies or magic-link tokens are stored.
 One proxy per line in `proxies.txt`; `http://`, `https://`, `socks4://`,
 `socks4a://`, `socks5://` and `socks5h://` are supported, with credentials in
 `type://user:pass@host:port`. Proxies rotate round-robin per account. The same
-proxy is passed to the browser helpers through `BROWSER_PROXY`.
+proxy is passed to the browser helpers through `BROWSER_PROXY`; the bypass list
+and `--insecure` are forwarded as `BROWSER_PROXY_BYPASS` and `BROWSER_INSECURE`.
 
 ## Flow
 
@@ -171,6 +182,10 @@ See [HANDOFF.md](HANDOFF.md) for exact endpoints, headers and failure modes.
 ## Tests
 
 ```bash
-node test/groq.test.js
+npm test          # built-in node:test runner, no network or browser needed
+npm run test:unit # same set of browser-free checks
 node groq-regger.js --selftest
 ```
+
+`--selftest` checks reachability, creates a temporary mailbox and verifies that
+`playwright-core` resolves in `tools/`; it does not launch the browser helpers.

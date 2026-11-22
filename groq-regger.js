@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { loadConfig, appendResult, appendKey } from './lib/store.js';
+import { loadConfig, appendAccount } from './lib/store.js';
 import { buildMailer } from './lib/mail.js';
 import { Transport } from './lib/http.js';
 import { registerGroqAccount } from './lib/groq.js';
@@ -50,7 +50,7 @@ Network:
   --proxy-type TYPE        used when --proxy is a bare host:port
   --proxy-file FILE        one proxy per line, rotated per account
   --proxy-bypass LIST      comma-separated hosts bypassing the proxy (browser)
-  --insecure               skip TLS certificate verification
+  --insecure               skip TLS checks in Node and in browser helpers
 
 Browser helpers / timing:
   --headless               hidden browser: real Chrome, window off-screen (default)
@@ -62,7 +62,7 @@ Browser helpers / timing:
   --page-url URL           /keys page URL for the Turnstile solver
 
 Misc:
-  --selftest               connectivity/helper checks, no registration
+  --selftest               network/mailbox/helper checks (creates a test mailbox)
   --verbose                detailed diagnostics
   -h, --help               this help
 `;
@@ -72,9 +72,12 @@ function fail(msg) {
   process.exit(2);
 }
 
+// parseInt('3abc') silently becomes 3; numeric flags must be exact so bad
+// values cannot reach timers, batch sizes or retry counters.
 function asInt(value, name, { min = 1, fallback = 0 } = {}) {
-  const n = Number.parseInt(value ?? String(fallback), 10);
-  if (!Number.isInteger(n) || n < min) fail(`${name} must be an integer >= ${min}`);
+  const text = String(value ?? fallback).trim();
+  const n = /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isSafeInteger(n) || n < min) fail(`${name} must be an integer >= ${min}`);
   return n;
 }
 
@@ -223,7 +226,8 @@ async function selftest(cfg, makeMailer, log) {
   }
 
   log(`selftest: ${failures === 0 ? 'all checks passed' : `${failures} check(s) failed`}`);
-  process.exit(failures === 0 ? 0 : 1);
+  // Setting exitCode (instead of process.exit) lets buffered stdout flush.
+  process.exitCode = failures === 0 ? 0 : 1;
 }
 
 async function main() {
@@ -264,6 +268,9 @@ async function main() {
 
   for (let i = 1; i <= cfg.count && !blocked; i += 1) {
     const accountProxy = rotator ? rotator.next() : cfg.proxy;
+    // Helpers read config.proxy from env; pass the effective per-account value
+    // so a rotated proxy is used by Node requests AND by Chrome/Edge.
+    const accountCfg = { ...cfg, proxy: accountProxy };
     log(`account ${i}/${cfg.count} via ${describeProxy(accountProxy)}`);
 
     let done = false;
@@ -272,14 +279,13 @@ async function main() {
         const mailer = makeMailer(accountProxy);
         mailer.inbox = await mailer.createInbox();
         const record = await registerGroqAccount({
-          config: cfg,
+          config: accountCfg,
           proxy: accountProxy,
           mailer,
           cwd: ROOT,
           log,
         });
-        appendResult(cfg.out, record);
-        appendKey(cfg.keysOut, record.api_key, record.email);
+        appendAccount({ resultsFile: cfg.out, keysFile: cfg.keysOut, record });
         ok += 1;
         done = true;
       } catch (err) {

@@ -12,7 +12,8 @@ working Groq **API key** (`gsk_…`), not a token or cookie.
 
 ## 1. Environment
 
-- Node.js 18+ (tested on Node 26). No Rust, no build step.
+- Node.js 20+ (tested on Node 26; required by `playwright-core` 1.65). No Rust,
+  no build step.
 - Helper dependency: `playwright-core` in `tools/` (`cd tools; npm i`).
   Playwright browsers are not downloaded; installed Chrome/Edge is used.
 - Hidden browser is the default: `headless: true`. This is a **headed** Chrome
@@ -61,7 +62,7 @@ lib/commands.js     external command runner, telemetry + Turnstile wrappers
 lib/groq.js         10-step flow, produces only the API key in the record
 lib/store.js        append-only JSONL + key file
 tools/*.js          browser helpers (CommonJS, use tools/node_modules)
-test/groq.test.js   unit checks (run: node test/groq.test.js)
+test/*.mjs          unit checks (run: npm test / npm run test:unit)
 ```
 
 Records intentionally omit `session_jwt`, `session_token`, cookies and
@@ -86,7 +87,10 @@ Copy `config.example.json` to `config.json`. Key fields:
 ```
 
 CLI flags override config values. Proxies are rotated per account and passed to
-browser helpers via `BROWSER_PROXY`.
+browser helpers via `BROWSER_PROXY`, with `BROWSER_PROXY_BYPASS` and
+`BROWSER_INSECURE` forwarding `proxyBypass` / `insecure`. Numeric flags are
+strict integers. `appendAccount()` writes the JSONL record and key file as one
+operation with rollback on failure.
 
 ## 5. Turnstile reliability
 
@@ -102,7 +106,8 @@ each retry.
 ## 6. Acceptance
 
 ```bash
-node groq-regger.js --selftest
+npm test                              # browser-free unit checks
+node groq-regger.js --selftest        # network/mailbox/module check (creates a mailbox)
 node groq-regger.js --count 1 --attempts 1 --verbose
 node groq-regger.js --count 10 --proxy-file proxies.txt
 ```
